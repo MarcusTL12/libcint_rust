@@ -2,10 +2,67 @@ pub use libc::{c_double, c_int, c_void};
 pub use std::ptr::{null, null_mut};
 
 extern "C" {
-    pub fn CINTgto_norm(l: c_int, e: c_double) -> c_double;
+    fn CINTgto_norm(l: c_int, e: c_double) -> c_double;
+}
+
+pub fn gto_norm(l: i32, e: f64) -> f64 {
+    unsafe { CINTgto_norm(l, e) }
+}
+
+pub struct CINToptimizer {
+    opt: *const c_void,
+    allocated: bool,
+}
+
+impl Drop for CINToptimizer {
+    fn drop(&mut self) {
+        extern "C" {
+            fn CINTdel_optimizer(opt: *mut *const c_void);
+        }
+
+        if self.allocated {
+            unsafe {
+                CINTdel_optimizer(&mut self.opt as *mut _);
+            }
+        }
+    }
 }
 
 #[macro_export]
+macro_rules! cint_opt {
+    ($f:ident) => {{
+        extern "C" {
+            fn $f(
+                opt: *mut *const c_void,
+                atm: *const c_int,
+                natm: c_int,
+                bas: *const c_int,
+                nbas: c_int,
+                env: *mut c_double,
+            );
+        }
+
+        |atm: &[[i32; 6]], bas: &[[i32; 8]], env: &mut [f64]| {
+            let mut opt = null();
+            unsafe {
+                $f(
+                    &mut opt as *mut _,
+                    atm.as_ptr() as *const c_int,
+                    atm.len() as c_int,
+                    bas.as_ptr() as *const c_int,
+                    bas.len() as c_int,
+                    env.as_mut_ptr(),
+                );
+            }
+            CINToptimizer {
+                opt,
+                allocated: true,
+            }
+        }
+    }};
+}
+
+#[allow(unused_macros)]
 macro_rules! cint_func {
     ($f:ident, $n_shl:expr) => {{
         extern "C" {
@@ -27,7 +84,8 @@ macro_rules! cint_func {
          shls: [i32; $n_shl],
          atm: &[[i32; 6]],
          bas: &[[i32; 8]],
-         env: &mut [f64]| unsafe {
+         env: &mut [f64],
+         opt: &CINToptimizer| unsafe {
             $f(
                 buf.as_mut_ptr(),
                 null(),
@@ -37,24 +95,63 @@ macro_rules! cint_func {
                 bas.as_ptr() as *const c_int,
                 bas.len() as i32,
                 env.as_mut_ptr(),
-                null(),
+                opt.opt,
                 null_mut(),
             )
         }
     }};
 }
 
+#[allow(unused_macros)]
+macro_rules! cint_noopt {
+    ($f:ident, $n_shl:expr) => {{
+        let func = cint_func!($f, $n_shl);
+
+        move |buf: &mut [f64],
+         shls: [i32; $n_shl],
+         atm: &[[i32; 6]],
+         bas: &[[i32; 8]],
+         env: &mut [f64]| {
+            func(
+                buf,
+                shls,
+                atm,
+                bas,
+                env,
+                &CINToptimizer {
+                    opt: null(),
+                    allocated: false,
+                },
+            )
+        }
+    }};
+}
+
 #[macro_export]
-macro_rules! cint1e {
+macro_rules! cint1e_opt {
     ($f:ident) => {
         cint_func!($f, 2)
     };
 }
 
 #[macro_export]
-macro_rules! cint2e {
+macro_rules! cint2e_opt {
     ($f:ident) => {
         cint_func!($f, 4)
+    };
+}
+
+#[macro_export]
+macro_rules! cint1e {
+    ($f:ident) => {
+        cint_noopt!($f, 2)
+    };
+}
+
+#[macro_export]
+macro_rules! cint2e {
+    ($f:ident) => {
+        cint_noopt!($f, 4)
     };
 }
 
@@ -68,11 +165,7 @@ mod tests {
         println!("Test1: {}", norm);
     }
 
-    #[test]
-    fn test_overlap() {
-        let ovlp = cint1e!(int1e_ovlp_sph);
-
-        let mut buf = [0.0; 9];
+    fn get_h2o_ccpvdz_params() -> ([[i32; 6]; 3], [[i32; 8]; 12], [f64; 106]) {
         let atm = [
             [8, 20, 0, 0, 0, 0],
             [1, 74, 0, 0, 0, 0],
@@ -92,7 +185,7 @@ mod tests {
             [2, 0, 1, 1, 0, 102, 103, 0],
             [2, 1, 1, 1, 0, 104, 105, 0],
         ];
-        let mut env = [
+        let env = [
             0.0,
             0.0,
             0.0,
@@ -201,7 +294,18 @@ mod tests {
             1.9584045348700287,
         ];
 
-        ovlp(&mut buf, [3, 8], &atm, &bas, &mut env);
+        (atm, bas, env)
+    }
+
+    #[test]
+    fn test_overlap() {
+        let ovlp_func = cint1e!(int1e_ovlp_sph);
+
+        let mut buf = [0.0; 9];
+
+        let (atm, bas, mut env) = get_h2o_ccpvdz_params();
+
+        ovlp_func(&mut buf, [3, 8], &atm, &bas, &mut env);
         println!("overlap: {:?}\n", buf);
 
         let check = [
@@ -214,6 +318,75 @@ mod tests {
             -0.0,
             0.0,
             0.28759899604856765,
+        ];
+
+        for (a, b) in buf.iter().zip(check.iter()) {
+            assert!((a - b).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_eri() {
+        let eri_func = cint2e!(int2e_sph);
+
+        let mut buf = [0.0; 15];
+
+        let (atm, bas, mut env) = get_h2o_ccpvdz_params();
+
+        eri_func(&mut buf, [1, 6, 11, 5], &atm, &bas, &mut env);
+
+        let check = [
+            0.08479537298282352,
+            -0.015420694555831652,
+            0.0,
+            0.0,
+            0.0,
+            0.08253851715317655,
+            -0.006719324031110618,
+            0.03367549074917227,
+            0.0,
+            0.0,
+            0.0,
+            0.0060861207370332526,
+            0.0015438892280071129,
+            0.05281528750373969,
+            0.0,
+        ];
+
+        for (a, b) in buf.iter().zip(check.iter()) {
+            assert!((a - b).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_eri_opt() {
+        let eri_func = cint2e_opt!(int2e_sph);
+        let opt_func = cint_opt!(int2e_optimizer);
+
+        let mut buf = [0.0; 15];
+
+        let (atm, bas, mut env) = get_h2o_ccpvdz_params();
+
+        let opt = opt_func(&atm, &bas, &mut env);
+
+        eri_func(&mut buf, [1, 6, 11, 5], &atm, &bas, &mut env, &opt);
+
+        let check = [
+            0.08479537298282352,
+            -0.015420694555831652,
+            0.0,
+            0.0,
+            0.0,
+            0.08253851715317655,
+            -0.006719324031110618,
+            0.03367549074917227,
+            0.0,
+            0.0,
+            0.0,
+            0.0060861207370332526,
+            0.0015438892280071129,
+            0.05281528750373969,
+            0.0,
         ];
 
         for (a, b) in buf.iter().zip(check.iter()) {
