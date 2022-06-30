@@ -1,10 +1,6 @@
-// use std::env;
-
 use cmake;
 
 fn main() {
-    println!("Hei build!");
-
     let dst = cmake::build("qcint");
 
     println!("{}", dst.display());

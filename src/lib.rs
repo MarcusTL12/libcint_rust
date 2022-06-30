@@ -10,8 +10,8 @@ pub fn gto_norm(l: i32, e: f64) -> f64 {
 }
 
 pub struct CINToptimizer {
-    opt: *const c_void,
-    allocated: bool,
+    pub opt: *const c_void,
+    pub allocated: bool,
 }
 
 impl Drop for CINToptimizer {
