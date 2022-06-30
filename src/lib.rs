@@ -62,7 +62,7 @@ macro_rules! cint_opt {
     }};
 }
 
-#[allow(unused_macros)]
+#[macro_export]
 macro_rules! cint_func {
     ($f:ident, $n_shl:expr) => {{
         extern "C" {
@@ -102,7 +102,7 @@ macro_rules! cint_func {
     }};
 }
 
-#[allow(unused_macros)]
+#[macro_export]
 macro_rules! cint_noopt {
     ($f:ident, $n_shl:expr) => {{
         let func = cint_func!($f, $n_shl);
