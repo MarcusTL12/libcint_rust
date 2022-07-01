@@ -85,7 +85,7 @@ macro_rules! cint_func {
          atm: &[[i32; 6]],
          bas: &[[i32; 8]],
          env: &mut [f64],
-         opt: &CINToptimizer| unsafe {
+         opt: Option<&CINToptimizer>| unsafe {
             $f(
                 buf.as_mut_ptr(),
                 null(),
@@ -95,7 +95,7 @@ macro_rules! cint_func {
                 bas.as_ptr() as *const c_int,
                 bas.len() as i32,
                 env.as_mut_ptr(),
-                opt.opt,
+                opt.and_then(|opt| Some(opt.opt)).unwrap_or(null()),
                 null_mut(),
             )
         }
@@ -103,55 +103,16 @@ macro_rules! cint_func {
 }
 
 #[macro_export]
-macro_rules! cint_noopt {
-    ($f:ident, $n_shl:expr) => {{
-        let func = cint_func!($f, $n_shl);
-
-        move |buf: &mut [f64],
-         shls: [i32; $n_shl],
-         atm: &[[i32; 6]],
-         bas: &[[i32; 8]],
-         env: &mut [f64]| {
-            func(
-                buf,
-                shls,
-                atm,
-                bas,
-                env,
-                &CINToptimizer {
-                    opt: null(),
-                    allocated: false,
-                },
-            )
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! cint1e_opt {
+macro_rules! cint1e {
     ($f:ident) => {
         cint_func!($f, 2)
     };
 }
 
 #[macro_export]
-macro_rules! cint2e_opt {
-    ($f:ident) => {
-        cint_func!($f, 4)
-    };
-}
-
-#[macro_export]
-macro_rules! cint1e {
-    ($f:ident) => {
-        cint_noopt!($f, 2)
-    };
-}
-
-#[macro_export]
 macro_rules! cint2e {
     ($f:ident) => {
-        cint_noopt!($f, 4)
+        cint_func!($f, 4)
     };
 }
 
@@ -305,7 +266,7 @@ mod tests {
 
         let (atm, bas, mut env) = get_h2o_ccpvdz_params();
 
-        ovlp_func(&mut buf, [3, 8], &atm, &bas, &mut env);
+        ovlp_func(&mut buf, [3, 8], &atm, &bas, &mut env, None);
         println!("overlap: {:?}\n", buf);
 
         let check = [
@@ -333,7 +294,7 @@ mod tests {
 
         let (atm, bas, mut env) = get_h2o_ccpvdz_params();
 
-        eri_func(&mut buf, [1, 6, 11, 5], &atm, &bas, &mut env);
+        eri_func(&mut buf, [1, 6, 11, 5], &atm, &bas, &mut env, None);
 
         let check = [
             0.08479537298282352,
@@ -360,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_eri_opt() {
-        let eri_func = cint2e_opt!(int2e_sph);
+        let eri_func = cint2e!(int2e_sph);
         let opt_func = cint_opt!(int2e_optimizer);
 
         let mut buf = [0.0; 15];
@@ -369,7 +330,7 @@ mod tests {
 
         let opt = opt_func(&atm, &bas, &mut env);
 
-        eri_func(&mut buf, [1, 6, 11, 5], &atm, &bas, &mut env, &opt);
+        eri_func(&mut buf, [1, 6, 11, 5], &atm, &bas, &mut env, Some(&opt));
 
         let check = [
             0.08479537298282352,
