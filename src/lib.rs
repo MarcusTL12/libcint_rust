@@ -10,14 +10,14 @@ pub fn gto_norm(l: i32, e: f64) -> f64 {
 }
 
 pub struct CINToptimizer {
-    pub opt: *const c_void,
+    pub opt: *mut c_void,
     pub allocated: bool,
 }
 
 impl Drop for CINToptimizer {
     fn drop(&mut self) {
         extern "C" {
-            fn CINTdel_optimizer(opt: *mut *const c_void);
+            fn CINTdel_optimizer(opt: *mut *mut c_void);
         }
 
         if self.allocated {
@@ -33,17 +33,17 @@ macro_rules! cint_opt {
     ($f:ident) => {{
         extern "C" {
             fn $f(
-                opt: *mut *const c_void,
+                opt: *mut *mut c_void,
                 atm: *const c_int,
                 natm: c_int,
                 bas: *const c_int,
                 nbas: c_int,
-                env: *mut c_double,
+                env: *const c_double,
             );
         }
 
-        |atm: &[[i32; 6]], bas: &[[i32; 8]], env: &mut [f64]| {
-            let mut opt = null();
+        |atm: &[[i32; 6]], bas: &[[i32; 8]], env: &[f64]| {
+            let mut opt = null_mut();
             unsafe {
                 $f(
                     &mut opt as *mut _,
@@ -51,7 +51,7 @@ macro_rules! cint_opt {
                     atm.len() as c_int,
                     bas.as_ptr() as *const c_int,
                     bas.len() as c_int,
-                    env.as_mut_ptr(),
+                    env.as_ptr(),
                 );
             }
             CINToptimizer {
@@ -74,8 +74,8 @@ macro_rules! cint_func {
                 natm: c_int,
                 bas: *const c_int,
                 nbas: c_int,
-                env: *mut c_double,
-                opt: *const c_void,
+                env: *const c_double,
+                opt: *mut c_void,
                 cache: *mut c_double,
             ) -> c_int;
         }
@@ -84,8 +84,8 @@ macro_rules! cint_func {
          shls: [i32; $n_shl],
          atm: &[[i32; 6]],
          bas: &[[i32; 8]],
-         env: &mut [f64],
-         opt: Option<&CINToptimizer>| unsafe {
+         env: &[f64],
+         opt: Option<&mut CINToptimizer>| unsafe {
             $f(
                 buf.as_mut_ptr(),
                 null(),
@@ -94,8 +94,8 @@ macro_rules! cint_func {
                 atm.len() as i32,
                 bas.as_ptr() as *const c_int,
                 bas.len() as i32,
-                env.as_mut_ptr(),
-                opt.and_then(|opt| Some(opt.opt)).unwrap_or(null()),
+                env.as_ptr(),
+                opt.and_then(|opt| Some(opt.opt)).unwrap_or(null_mut()),
                 null_mut(),
             )
         }
@@ -264,9 +264,9 @@ mod tests {
 
         let mut buf = [0.0; 9];
 
-        let (atm, bas, mut env) = get_h2o_ccpvdz_params();
+        let (atm, bas, env) = get_h2o_ccpvdz_params();
 
-        ovlp_func(&mut buf, [3, 8], &atm, &bas, &mut env, None);
+        ovlp_func(&mut buf, [3, 8], &atm, &bas, &env, None);
         println!("overlap: {:?}\n", buf);
 
         let check = [
@@ -292,9 +292,9 @@ mod tests {
 
         let mut buf = [0.0; 15];
 
-        let (atm, bas, mut env) = get_h2o_ccpvdz_params();
+        let (atm, bas, env) = get_h2o_ccpvdz_params();
 
-        eri_func(&mut buf, [1, 6, 11, 5], &atm, &bas, &mut env, None);
+        eri_func(&mut buf, [1, 6, 11, 5], &atm, &bas, &env, None);
 
         let check = [
             0.08479537298282352,
@@ -328,9 +328,16 @@ mod tests {
 
         let (atm, bas, mut env) = get_h2o_ccpvdz_params();
 
-        let opt = opt_func(&atm, &bas, &mut env);
+        let mut opt = opt_func(&atm, &bas, &mut env);
 
-        eri_func(&mut buf, [1, 6, 11, 5], &atm, &bas, &mut env, Some(&opt));
+        eri_func(
+            &mut buf,
+            [1, 6, 11, 5],
+            &atm,
+            &bas,
+            &mut env,
+            Some(&mut opt),
+        );
 
         let check = [
             0.08479537298282352,
