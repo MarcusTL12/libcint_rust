@@ -28,6 +28,8 @@ impl Drop for CINToptimizer {
     }
 }
 
+unsafe impl Send for CINToptimizer {}
+
 #[macro_export]
 macro_rules! cint_opt {
     ($f:ident) => {{
